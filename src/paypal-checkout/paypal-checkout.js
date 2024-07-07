@@ -954,10 +954,60 @@ PayPalCheckout.prototype._createFrameServiceCallback = function (
   frameCommunicationPromise
 ) {
   var self = this;
+  var client = this._clientPromise;
 
-  // TODO when a merchant integrates an iOS or Android integration
-  // with a webview using the web SDK, we will have to add popupbridge
-  // support
+  // When a merchant integrates an iOS or Android integration
+  // with a webview using the web SDK, check for presence of popupbridge
+  // @start - popup bridge support
+  if (window.popupBridge) {
+    return function (err, payload) {
+      if (err) {
+        analytics.sendEvent(
+          client,
+          "paypal-checkout.closed-popupbridge.by-user"
+        );
+        // TODO: check if this is the correct error
+        frameCommunicationPromise.reject(
+          new BraintreeError(errors.PAYPAL_POPUP_CLOSED)
+        );
+        frameCommunicationPromise.reject(err);
+      } else {
+        window.popupBridge.onComplete = function (err, payload) {
+          console.log(
+            `onComplete called with err: ${err} and payload: ${payload}`
+          );
+          var data = payload && payload.queryItems ? payload.queryItems : {};
+          if (err) {
+            analytics.sendEvent(
+              client,
+              "paypal-checkout.closed-popupbridge.by-user"
+            );
+            frameCommunicationPromise.reject(err);
+          } else {
+            console.log(`data: ${data}`);
+            self
+              .tokenizePayment({
+                paymentToken: data.token,
+                payerID: data.PayerID,
+                paymentID: data.paymentId,
+                orderID: data.orderId,
+              })
+              .then(function (res) {
+                frameCommunicationPromise.resolve(res);
+              })
+              .catch(function (tokenizationError) {
+                frameCommunicationPromise.reject(tokenizationError);
+              });
+          }
+        };
+        // attempt to redirect to the loading frame
+        console.log(`loadingFrameUrl: ${self._loadingFrameUrl}`);
+        window.popupBridge.open(self._loadingFrameUrl);
+      }
+    };
+  }
+  // @end - popup bridge support
+
   return function (err, payload) {
     if (err) {
       frameCommunicationPromise.reject(err);
